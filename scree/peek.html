@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>Scree Peek</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#2a3033;overflow:hidden;font:12px sans-serif;color:#cfd6cf}
+  /* canvas lives in #stage; controls are a side panel next to it, so they never cover the image */
+  body{display:flex;flex-direction:row}
+  #stage{flex:1;min-width:0;min-height:0;position:relative;container-type:size;display:flex;align-items:center;justify-content:center}
+  canvas{width:min(100cqw,100cqh);height:min(100cqw,100cqh);image-rendering:pixelated;display:block}
+  #ui{width:270px;flex:none;height:100%;box-sizing:border-box;overflow-y:auto;background:#161b19;border-left:1px solid #2f3833;padding:8px 10px 16px;display:flex;flex-direction:column;gap:5px}
+  body.ui-hidden #ui{display:none}
+  #ui h4{margin:10px 0 2px;font-size:11px;font-weight:600;letter-spacing:.08em;color:#8fa398;border-bottom:1px solid #2f3833;padding-bottom:3px}
+  #ui h4:first-child{margin-top:0}
+  #ui label{display:flex;align-items:center;gap:6px;justify-content:space-between;min-height:22px}
+  #ui label:has(input[type=checkbox]){justify-content:flex-start}
+  #ui input[type=range]{width:120px;flex:none}
+  #ui .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  #ui .hint,#ui .seed{opacity:.65;font-size:11px}
+  #uitoggle{position:absolute;top:8px;right:8px;z-index:5;opacity:.7}
+  #uitoggle:hover{opacity:1}
+  @media (max-width: 760px){
+    body{flex-direction:column}
+    #ui{width:auto;height:42vh;border-left:none;border-top:1px solid #2f3833}
+  }
+  #dlg{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:10}
+  #dlg[hidden]{display:none}
+  #dlg .box{background:#20262a;border:1px solid #4a554d;border-radius:6px;padding:12px;width:min(560px,92vw);display:flex;flex-direction:column;gap:8px}
+  #dlg textarea{height:160px;background:#151a1c;color:#dde;border:1px solid #4a554d;font:12px monospace;padding:6px;resize:vertical}
+  #dlg .row{display:flex;gap:6px;align-items:center;justify-content:flex-end}
+  #dlg #dlgmsg{flex:1;color:#e9a;font-size:12px}
+  button,select{background:#2c332e;color:#dde;border:1px solid #4a554d;padding:3px 8px;cursor:pointer}
+</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+<div id="dlg" hidden>
+  <div class="box">
+    <div id="dlgtitle">設定を読み込む</div>
+    <textarea id="dlgtext" spellcheck="false" placeholder="コピーした設定をここに貼り付け"></textarea>
+    <div class="row"><span id="dlgmsg"></span><button id="dlgok">適用</button><button id="dlgcancel">閉じる</button></div>
+  </div>
+</div>
+<div id="stage"><button id="uitoggle" title="コントロールパネルの表示/非表示">⚙ パネル</button></div>
+<div id="ui">
+  <h4>裸眼3D</h4>
+  <div class="row"><button id="trk">📷 ヘッドトラッキング開始</button><span id="trkst" class="hint">オフ（画面をドラッグして試せます）</span></div>
+  <label>画面の幅 cm <span class="row"><input type="range" id="scrw" min="4" max="60" step="0.5" value="7"><span id="scrwv">7</span></span></label>
+  <label>カメラは画面の上 cm <span class="row"><input type="range" id="camoff" min="0" max="25" step="0.5" value="7"><span id="camoffv">7</span></span></label>
+  <label>カメラの画角 <span class="row"><input type="range" id="hfov" min="40" max="90" step="1" value="62"><span id="hfovv">62°</span></span></label>
+  <label>立体感の強さ <input type="range" id="peekk" min="0" max="2" step="0.05" value="1"></label>
+  <label>箱の奥行き <input type="range" id="boxd" min="0" max="6" step="0.1" value="3.2"></label>
+  <label><input type="checkbox" id="box" checked> 箱を表示</label>
+  <label><input type="checkbox" id="mirror"> 左右が逆ならチェック</label>
+
+  <h4>画面</h4>
+  <label>ピクセル <select id="pix"><option>1</option><option selected>2</option><option>3</option></select></label>
+  <label>ズーム <span class="row"><input type="range" id="zoom" min="0.9" max="1.8" step="0.05" value="1.65"><span id="zoomv">1.65</span></span></label>
+  <label><input type="checkbox" id="dither" checked> ディザ</label>
+  <label><input type="checkbox" id="outline"> 輪郭線</label>
+  <label><input type="checkbox" id="palette"> 花のパレット</label>
+
+  <h4>メコノプシス</h4>
+  <label>株数 <span class="row"><input type="range" id="clumps" min="1" max="16" step="1" value="6"><span id="clumpsv">6</span></span></label>
+  <label>大きさ <input type="range" id="msize" min="0.5" max="1.6" step="0.05" value="1"></label>
+  <div class="row"><button id="reroll">🎲 メコノプシスをランダムに</button><span id="seedv" class="seed">seed 7070</span></div>
+  <label><input type="checkbox" id="hero" checked> 遠くの小さな株</label>
+  <label><input type="checkbox" id="fg"> 手前のメコノプシス</label>
+  <label>手前の大きさ <input type="range" id="fgs" min="0.6" max="3" step="0.05" value="1.3"></label>
+  <div class="row"><button id="fgroll">🎲 手前をランダムに</button><span id="fgseedv" class="seed">fg 31337</span></div>
+
+  <h4>ガレ場</h4>
+  <label>砕石 <span class="row"><input type="range" id="rocks" min="0" max="2400" step="50" value="1900"><span id="rocksv">1900</span></span></label>
+  <label>草のクッション <input type="range" id="greenk" min="0" max="1" step="0.05" value="0.45"></label>
+  <label>小さな花 <input type="range" id="smallf" min="0" max="3" step="0.1" value="1"></label>
+  <div class="row"><button id="rockroll">🎲 砕石をランダムに</button><span id="rockseedv" class="seed">rock 515</span></div>
+  <label><input type="checkbox" id="clip"> 下端を切り取る</label>
+
+  <h4>光</h4>
+  <label>時間帯 <select id="tod">
+    <option value="overcast" selected>曇りともや（既定）</option><option value="breaking">晴れ間</option><option value="dawn">早朝</option>
+    <option value="morning">午前</option><option value="dusk">夕暮れ</option><option value="night">夜（月明かり）</option></select></label>
+  <label>雲の影の割合 <input type="range" id="shadef" min="0" max="0.7" step="0.05" value="0"></label>
+  <label>影の明るさ <input type="range" data-lit="uLiftK" min="0" max="2" step="0.1" value="1"></label>
+  <label>日なたの花の明るさ <input type="range" data-lit="uFlowerLit" min="1" max="4" step="0.1" value="1.3"></label>
+  <label>明暗の境目 <input type="range" data-lit="uEdge" min="0" max="1" step="0.05" value="0.3"></label>
+
+  <h4>空気</h4>
+  <label>遠景の霧 <input type="range" data-fog="uFar" min="0" max="1" step="0.05" value="0.65"></label>
+  <label>霧の始まり <input type="range" data-fog="uFarStart" min="-0.8" max="1.0" step="0.05" value="-0.35"></label>
+  <label>地表のもや <input type="range" data-fog="uMist" min="0" max="1" step="0.05" value="0"></label>
+  <label>もやの高さ <input type="range" data-fog="uMistH" min="0.04" max="0.5" step="0.02" value="0.2"></label>
+  <label>手前を暗く <input type="range" data-fog="uFront" min="0" max="0.8" step="0.05" value="0.3"></label>
+
+  <h4>被写界深度</h4>
+  <label><input type="checkbox" id="dof"> 被写界深度 <span class="hint">（画面クリックでピント合わせ）</span></label>
+  <label>ぼかし <input type="range" id="dofs" min="1" max="8" step="0.5" value="2"></label>
+  <label>ピントの範囲 <input type="range" id="dofr" min="0" max="1.2" step="0.05" value="0.8"></label>
+
+  <h4>設定</h4>
+  <div class="row"><select id="slot" data-nosave></select><button id="slotsave">💾 保存</button><button id="slotload">📂 読み込み</button></div>
+  <div class="row"><button id="copyset">📋 コピー</button><button id="importset">📥 読み込み</button></div>
+
+  <h4>出力</h4>
+  <div class="row"><button id="rec">● 録画 5秒</button><span id="st"></span></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+/* ================= config ================= */
+const OUT = 960;                       // output canvas px (recorded video size)
+const BG = new THREE.Color('#2a3033');  // flat background (dark, island edges dissolve into it)
+const FOG = new THREE.Color('#9aa4a8'); // mountain mist
+const R = 1.3;                          // island radius (m)
+const WIND = new THREE.Vector3(0.93, 0, 0.36).normalize(); // blows toward screen right/down
+
+/* ================= noise / rng ================= */
+const hash = (x, y) => { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); };
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+const fbm = (x, y) => { let s = 0, a = 0.5, f = 1; for (let i = 0; i < 4; i++) { s += a * vnoise(x * f, y * f); f *= 2; a *= 0.5; } return s / 0.9375; };
+let seed = 20261121; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/* ================= field functions =================
+   Camera looks from +X+Y+Z, so screen bottom-right = +X, top-left = -X.  */
+// edge roughness: bottom-right (+X) breaks up into notches, crumbs and stray clods like a torn edge
+const roughW = (x, z) => smooth(0.05, 0.6, x / R + 0.15 * z / R);
+const mask = (x, z) => {
+  const base = 1 - Math.hypot(x, z) / R + (fbm(x * 1.8 + 5, z * 1.8 + 5) - 0.5) * 0.6;
+  const w = roughW(x, z);
+  if (w <= 0) return base;
+  return base + w * ((fbm(x * 6 + 1, z * 6 + 3) - 0.5) * 0.42 + (vnoise(x * 18 + 7, z * 18 + 2) - 0.5) * 0.22);
+};
+const SLOPE = 0.34;   // a steep scree slope rising toward the top-left
+const heightAt = (x, z) => -SLOPE * x + 0.1 * (fbm(x * 1.3 + 2, z * 1.3) - 0.5);
+const dirtAt = (x, z) => 0;
+let GREEN = 0.45;   // how much of the slope is covered by green cushions (slider)
+const greenAt = (x, z) => smooth(0.62 - 0.3 * GREEN, 0.74 - 0.3 * GREEN, fbm(x * 2.3 + 4, z * 2.3 - 1) * 0.8 + vnoise(x * 7 + 3, z * 7) * 0.2 + 0.12 * x / R);
+const centerW = (x, z) => Math.exp(-(x * x + z * z) / (2 * 0.5 * 0.5));
+
+/* ================= renderer / scene ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(1); renderer.setSize(OUT, OUT, false);
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+document.getElementById('stage').appendChild(renderer.domElement);
+// panel toggle (remembered per browser)
+{ const KEY = 'pixel-diorama-ui-hidden';
+  try { const v = localStorage.getItem(KEY); if (v === '1' || (v === null && matchMedia('(pointer: coarse)').matches)) document.body.classList.add('ui-hidden'); } catch {}
+  document.getElementById('uitoggle').onclick = () => {
+    const h = document.body.classList.toggle('ui-hidden');
+    try { localStorage.setItem(KEY, h ? '1' : '0'); } catch {}
+  }; }
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(FOG, 9.85, 11.7);
+
+/* ================= layered fog =================
+   foreground darkened -> midground clear -> background hazy,
+   plus a low ground mist that hides grass roots so blades separate in depth. */
+const fogU = {
+  uFar: { value: 0.65 },                               // background haze strength
+  uMist: { value: 0.0 },                              // ground mist strength
+  uMistH: { value: 0.2 },                             // ground mist height (m)
+  uMistColor: { value: new THREE.Color('#4d5d58') },
+  uFront: { value: 0.3 },                              // foreground darkening
+  uFrontAt: { value: -0.2 },                           // where foreground darkening ends (scene depth, m)
+  uFarStart: { value: -0.35 },                           // where background haze starts (0 = center)
+  uFarEnd: { value: 1.05 },                             // where haze is full
+  uFwd: { value: new THREE.Vector2(-1, -1).normalize() }, // camera forward on the ground plane
+};
+function patchFog(sh) {
+  Object.assign(sh.uniforms, fogU);
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <fog_pars_vertex>', '#include <fog_pars_vertex>\nvarying vec3 vWPos;')
+    .replace('#include <fog_vertex>', '#include <fog_vertex>\nvWPos = (inverse(viewMatrix) * mvPosition).xyz;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <fog_pars_fragment>', `#include <fog_pars_fragment>
+      varying vec3 vWPos;
+      uniform float uFar, uMist, uMistH, uFront, uFrontAt, uFarStart, uFarEnd; uniform vec3 uMistColor; uniform vec2 uFwd;`)
+    .replace('#include <fog_fragment>', `
+      #ifdef USE_FOG
+      {
+        // scene depth = how far back along the ground, independent of height,
+        // so a tall flower gets the same haze as the ground it stands on
+        float sd = dot(vWPos.xz, uFwd);
+        float dF = smoothstep(uFarStart, uFarEnd, sd);
+        float hgt = vWPos.y - (-0.34 * vWPos.x);
+        float mist = (1.0 - smoothstep(0.0, uMistH, hgt)) * uMist * (0.15 + 0.85 * dF);
+        float front = (1.0 - smoothstep(uFrontAt - 1.1, uFrontAt, sd)) * uFront;
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, uMistColor, mist);
+        gl_FragColor.rgb *= 1.0 - front;
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, dF * uFar);
+      }
+      #endif`);
+  patchLight(sh);
+}
+/* ================= shadow look =================
+   shadows keep a green-yellow canopy light, objects bounce their own hue
+   (green grass, red petals, yellow straw) into the shade, and the light/shadow
+   boundary gets a darker band. */
+const litU = {
+  uShadowLift: { value: new THREE.Vector3(0.15, 0.17, 0.12) }, // fraction of sun left in shade (canopy-filtered)
+  uLiftK: { value: 1.0 },
+  uFlowerLit: { value: 1.3 },
+  uFlowerWarm: { value: 1.0 },                                 // how much the boost shifts toward orange (0 at night)                                  // extra sunlight on flower heads (1 = none)
+  uEdge: { value: 0.3 },
+};
+const SHADOW_LINE = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
+const LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(SHADOW_LINE, `
+    { float sh = ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+      gSun = directLight.color; gShadow = min(gShadow, sh);
+      directLight.color *= mix(uShadowLift * uLiftK, vec3(1.0), sh); }`);
+if (!THREE.ShaderChunk.lights_fragment_begin.includes(SHADOW_LINE)) console.warn('shadow chunk changed; shadow look disabled');
+function patchLight(sh) {
+  if (!sh.fragmentShader.includes('#include <lights_fragment_begin>')) return;
+  Object.assign(sh.uniforms, litU);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('void main() {', 'uniform vec3 uShadowLift; uniform float uLiftK, uEdge, uFlowerLit, uFlowerWarm;\nvoid main() {\n  float gShadow = 1.0; vec3 gSun = vec3(0.0);')
+    .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
+    .replace('#include <aomap_fragment>', `
+      {
+        #ifdef IS_FLOWER
+        // only the sunlit part is boosted, warming toward orange as it gets brighter
+        reflectedLight.directDiffuse *= uFlowerLit * vec3(1.0, 1.0 + 0.35 * uFlowerWarm * (uFlowerLit - 1.0), 1.0 + 0.1 * uFlowerWarm * (uFlowerLit - 1.0));
+        #endif
+        float dk = 1.0 - uEdge * 4.0 * gShadow * (1.0 - gShadow);
+        reflectedLight.directDiffuse *= dk; reflectedLight.indirectDiffuse *= dk;
+      }
+      #include <aomap_fragment>`);
+}
+
+
+const H = 1.65;
+const cam = new THREE.OrthographicCamera(-H, H, H, -H, 0.1, 30);
+const target = new THREE.Vector3(0, 0.12, 0);
+cam.position.copy(target).add(new THREE.Vector3(1, 1.15, 1).normalize().multiplyScalar(10));
+cam.lookAt(target);
+
+const hemi = new THREE.HemisphereLight(0x7f94a8, 0x2c2a1a, 0.6);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffc488, 4.2);
+const SUN_DIST = 20;
+sun.position.set(-4.2, 2.8, 1.6).normalize().multiplyScalar(SUN_DIST);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 6;
+Object.assign(sun.shadow.camera, { left: -3.2, right: 3.2, top: 3.2, bottom: -3.2, near: 1, far: 45 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.01;
+scene.add(sun, sun.target);
+
+const timeU = { value: 0 };
+let terrainMesh, grassMesh, grassMaskMat, grassGeo, grassMat;
+
+/* ================= terrain ================= */
+function buildTerrain() {
+  if (terrainMesh) { scene.remove(terrainMesh); terrainMesh.geometry.dispose(); }
+  let seed = 20261121; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const N = 170, S = 1.7, pos = [], col = [];
+  const cGround = new THREE.Color('#55595b'), cGround2 = new THREE.Color('#7b7e7f');
+  const cDirt = new THREE.Color('#36502a'), cDirt2 = new THREE.Color('#57703a');
+  const P = (i, j) => { const x = -S + 2 * S * i / N, z = -S + 2 * S * j / N; return [x, heightAt(x, z), z]; };
+  const c = new THREE.Color(), c2 = new THREE.Color();
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const a = P(i, j), b = P(i + 1, j), cc = P(i + 1, j + 1), d = P(i, j + 1);
+    for (const tri of [[a, cc, b], [a, d, cc]]) {
+      const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3, cz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
+      const m = mask(cx, cz); if (m <= 0) continue;
+      const n = fbm(cx * 6, cz * 6);
+      c.copy(cGround).lerp(cGround2, smooth(0.2, 0.8, n * 0.5 + rnd() * 0.5));      // gravel speckle
+      c2.copy(cDirt).lerp(cDirt2, smooth(0.35, 0.75, n + (rnd() - 0.5) * 0.3));
+      c.lerp(c2, greenAt(cx, cz) * 0.9);
+      c.multiplyScalar(0.55 + 0.45 * smooth(0, 0.25, m));
+      for (const v of tri) { pos.push(...v); col.push(c.r, c.g, c.b); }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  const t = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  t.material.onBeforeCompile = patchFog;
+  t.receiveShadow = true; scene.add(t); terrainMesh = t;
+}
+buildTerrain();
+
+/* ================= grass ================= */
+const GRASS_PAL = ['#2f4426', '#3f5a2c', '#527034', '#66813d', '#7d8b52', '#8f9668'].map(h => new THREE.Color(h));
+// shared wind (must match lily sway below)
+const WIND_GLSL = `
+  vec3 base = instanceMatrix[3].xyz;
+  float g = 0.5 + 0.5 * sin(uTime * 1.8 - base.x * 2.2 + base.z * 0.7);
+  float gust = 0.5 + 0.5 * sin(uTime * 0.55 - base.x * 0.9);
+`;
+function windJS(x, z, t) {
+  const g = 0.5 + 0.5 * Math.sin(t * 1.8 - x * 2.2 + z * 0.7);
+  const gust = 0.5 + 0.5 * Math.sin(t * 0.55 - x * 0.9);
+  return g * gust;
+}
+{
+  const p = [-0.5, 0, 0, 0.5, 0, 0, -0.4, 0.35, 0, 0.4, 0.35, 0, -0.22, 0.7, 0, 0.22, 0.7, 0, 0, 1, 0];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(Array(7).fill([0, 1, 0]).flat(), 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute([0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 1, 1, 1], 3));
+  g.setIndex([0, 1, 3, 0, 3, 2, 2, 3, 5, 2, 5, 4, 4, 5, 6]);
+
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uTime = timeU;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <project_vertex>', `
+      vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
+      { ${WIND_GLSL}
+        float k = position.y * position.y;
+        float amt = (0.012 + 0.06 * g * gust) * k;
+        mvPosition.xz += vec2(${WIND.x.toFixed(3)}, ${WIND.z.toFixed(3)}) * amt;
+        mvPosition.y -= amt * 0.35; }
+      mvPosition = modelViewMatrix * mvPosition;
+      gl_Position = projectionMatrix * mvPosition;`);
+    // keep up-facing normal on both sides so back faces are not dark
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>',
+      'float faceDirection = 1.0; vec3 normal = normalize(vNormal); vec3 nonPerturbedNormal = normal;');
+  };
+
+  grassMaskMat = new THREE.MeshLambertMaterial({ color: 0x000000, side: THREE.DoubleSide });
+  grassMaskMat.onBeforeCompile = mat.onBeforeCompile;
+  grassGeo = g; grassMat = mat;
+  { const base = mat.onBeforeCompile; mat.onBeforeCompile = sh => { base(sh); patchFog(sh); }; }
+}
+function buildGrass() {
+  if (grassMesh) { scene.remove(grassMesh); grassMesh.dispose(); }
+  let seed = 777; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const pal = GRASS_PAL, g = grassGeo, mat = grassMat;
+  const COUNT = 16000;
+  const im = new THREE.InstancedMesh(g, mat, COUNT);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), v = new THREE.Vector3(), c = new THREE.Color();
+  let n = 0, tries = 0;
+  while (n < COUNT && tries++ < COUNT * 20) {
+    const x = (rnd() * 2 - 1) * 1.7, z = (rnd() * 2 - 1) * 1.7;
+    const m = mask(x, z), dirt = dirtAt(x, z);
+    const rw = roughW(x, z);
+    // beyond the torn edge: more stray straw bits flying off the bottom-right
+    const gr = greenAt(x, z);
+    let p = m > 0 ? smooth(0, 0.3, m) * (0.04 + 0.96 * gr) : 0;
+    if (rnd() > p) continue;
+    const h = (0.035 + 0.075 * rnd()) * (0.6 + 0.6 * fbm(x * 3, z * 3)) * (0.5 + 0.5 * gr);
+    const w = 0.012 + 0.012 * rnd();
+    e.set((rnd() - 0.5) * 0.7, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.7);
+    q.setFromEuler(e);
+    m4.compose(v.set(x, heightAt(x, z) - 0.005, z), q, s.set(w, h, w));
+    im.setMatrixAt(n, m4);
+    const f = fbm(x * 2.2 + 30, z * 2.2) * 0.75 + rnd() * 0.35 + (1 - gr) * 0.4;
+    c.copy(pal[Math.min(pal.length - 1, Math.floor(f * pal.length))]).multiplyScalar(0.8 + 0.4 * rnd());
+    if (m < 0.15) c.multiplyScalar(0.6 + 2.6 * Math.max(0, m));
+    im.setColorAt(n, c);
+    n++;
+  }
+  im.count = n;
+  im.receiveShadow = true;
+  scene.add(im);
+  grassMesh = im;
+}
+buildGrass();
+function rebuildGround() {
+  buildTerrain(); buildGrass(); landScene.children[0].geometry = terrainMesh.geometry;
+  for (const l of lilies) if (!l.fg) l.y = heightAt(l.x, l.z) - 0.01;
+  buildRocks(); buildSmallFlowers();
+}
+
+
+/* ================= scree: angular rocks (instanced, a few procedural shapes) ================= */
+const ROCK_SHAPES = 5;
+const rockGeos = [];
+{
+  const cA = new THREE.Color(), cB = new THREE.Color();
+  for (let k = 0; k < ROCK_SHAPES; k++) {
+    const g = new THREE.IcosahedronGeometry(1, 0), p = g.attributes.position, v = new THREE.Vector3();
+    const jit = new Map();
+    for (let i = 0; i < p.count; i++) {        // the same jitter for the same corner keeps the solid closed
+      v.fromBufferAttribute(p, i);
+      const key = v.toArray().map(a => a.toFixed(3)).join();
+      if (!jit.has(key)) jit.set(key, 0.7 + 0.55 * hash(k * 7.1 + v.x * 3.3, v.y * 5.7 + v.z * 2.1));
+      v.multiplyScalar(jit.get(key));
+      v.y *= 0.5 + 0.1 * k / ROCK_SHAPES;       // flat slabs, like frost-split shale
+      v.x *= 1.0 + 0.25 * hash(k, 1.3);
+      p.setXYZ(i, v.x, v.y, v.z);
+    }
+    g.computeVertexNormals();                   // non-indexed -> flat facets
+    const col = [];
+    const n = g.attributes.normal;
+    for (let i = 0; i < p.count; i += 3) {
+      const ny = (n.getY(i) + n.getY(i + 1) + n.getY(i + 2)) / 3;
+      const h = hash(k * 13 + i * 0.37, i * 0.11);
+      cA.set('#6e7376').lerp(cB.set('#979b9c'), h);
+      if (ny > 0.55) cA.multiplyScalar(1.12);   // lighter tops
+      if (h > 0.86) cA.lerp(cB.set('#b9b98f'), 0.45);   // pale lichen
+      else if (h < 0.06) cA.lerp(cB.set('#9a6a48'), 0.4); // rusty facet
+      for (let j = 0; j < 3; j++) col.push(cA.r, cA.g, cA.b);
+    }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    rockGeos.push(g);
+  }
+}
+const rockMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+rockMat.onBeforeCompile = patchFog;
+let rockSeed = 515, rockMeshes = [], rockList = [];
+function buildRocks() {
+  for (const im of rockMeshes) { scene.remove(im); im.dispose(); }
+  rockMeshes = []; rockList = [];
+  let sd = rockSeed; const r = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const N = +document.getElementById('rocks').value;
+  const per = Array.from({ length: ROCK_SHAPES }, () => []);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  for (let t = 0; t < N * 12 && rockList.length < N; t++) {
+    const x = (r() * 2 - 1) * 1.7, z = (r() * 2 - 1) * 1.7, m = mask(x, z);
+    if (m < 0.0) continue;
+    const gr = greenAt(x, z);
+    if (r() > (0.12 + 0.88 * (1 - gr)) * smooth(-0.02, 0.12, m)) continue;
+    const big = r() ** 2.6;
+    const s = 0.016 + 0.1 * big * (m < 0.1 ? 0.5 : 1);
+    // keep big stones off the poppies' feet
+    if (s > 0.06 && lilies.some(l => !l.fg && Math.hypot(l.x - x, l.z - z) < s + 0.04)) continue;
+    rockList.push({ x, z, s });
+    const k = Math.floor(r() * ROCK_SHAPES);
+    e.set((r() - 0.5) * 0.35, r() * 6.283, (r() - 0.5) * 0.35 + 0.25);   // tilted down the slope a little
+    m4.compose(v.set(x, heightAt(x, z) + s * 0.12, z), q.setFromEuler(e), sc.set(s, s, s * (0.75 + 0.5 * r())));
+    per[k].push({ m: m4.clone(), c: 0.8 + 0.35 * r() });
+  }
+  const c = new THREE.Color();
+  per.forEach((list, k) => {
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(rockGeos[k], rockMat, list.length);
+    list.forEach((o, i) => { im.setMatrixAt(i, o.m); im.setColorAt(i, c.setScalar(o.c)); });
+    im.castShadow = im.receiveShadow = true;
+    scene.add(im); rockMeshes.push(im);
+  });
+}
+
+/* ================= small alpine flowers: yellow primula umbels, pink bistort spikes, magenta lousewort ================= */
+// unit-height geometry (scaled by plant height), vertex-colored, sways with the grass shader
+function flowerGeo(kind) {
+  const pos = [], col = [], C = new THREE.Color();
+  const tri = (a, b, c, hex) => { pos.push(...a, ...b, ...c); C.set(hex); for (let i = 0; i < 3; i++) col.push(C.r, C.g, C.b); };
+  const stem = '#4f6a33', leaf = '#5d7a3b';
+  // stalk (two crossed slivers)
+  tri([-0.03, 0, 0], [0.03, 0, 0], [0, 0.85, 0], stem); tri([0, 0, -0.03], [0, 0, 0.03], [0, 0.85, 0], stem);
+  // basal leaves
+  for (const a of [0.3, 2.4, 4.3]) {
+    const dx = Math.cos(a), dz = Math.sin(a);
+    tri([-dz * 0.12, 0.02, dx * 0.12], [dz * 0.12, 0.02, -dx * 0.12], [dx * 0.55, 0.18, dz * 0.55], leaf);
+  }
+  if (kind === 'yellow') {
+    // umbel of 5 little 5-petal flowers
+    for (let f = 0; f < 5; f++) {
+      const a = f * 1.257, cx = Math.cos(a) * 0.2, cz = Math.sin(a) * 0.2, cy = 0.9 + 0.06 * Math.sin(f * 2.1);
+      for (let k = 0; k < 5; k++) {
+        const b0 = k * 1.257, b1 = b0 + 1.257, rr = 0.19;
+        tri([cx, cy + 0.02, cz], [cx + Math.cos(b0) * rr, cy, cz + Math.sin(b0) * rr], [cx + Math.cos(b1) * rr, cy, cz + Math.sin(b1) * rr],
+          k % 2 ? '#e6c63a' : '#d8b42c');
+      }
+    }
+  } else {
+    // a plump spike (octahedron) on top
+    const hex = kind === 'pink' ? ['#e6aac4', '#f2d0df'] : ['#b8336f', '#d24e8a'];
+    const cy = 0.95, rw = 0.13, rh = 0.24;
+    const P = [[rw, cy, 0], [0, cy, rw], [-rw, cy, 0], [0, cy, -rw]], top = [0, cy + rh, 0], bot = [0, cy - rh * 0.8, 0];
+    for (let k = 0; k < 4; k++) { tri(P[k], P[(k + 1) % 4], top, hex[k % 2]); tri(P[(k + 1) % 4], P[k], bot, hex[(k + 1) % 2]); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  // up-facing normals like the grass blades: tiny heads read as lit color, never as dark backs
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(Array(pos.length / 3).fill([0, 1, 0]).flat(), 3));
+  return g;
+}
+const smallKinds = [['yellow', 45, [0.055, 0.085]], ['pink', 95, [0.07, 0.11]], ['magenta', 30, [0.05, 0.08]]];
+const smallGeos = smallKinds.map(([k]) => flowerGeo(k));
+let smallMeshes = [];
+function buildSmallFlowers() {
+  for (const im of smallMeshes) { scene.remove(im); im.dispose(); }
+  smallMeshes = [];
+  let sd = rockSeed ^ 0x5bd1; const r = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const k = +document.getElementById('smallf').value;
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
+  smallKinds.forEach(([kind, n0, [h0, h1]], ki) => {
+    const n = Math.round(n0 * k), list = [];
+    for (let t = 0; t < n * 40 && list.length < n; t++) {
+      const x = (r() * 2 - 1) * R, z = (r() * 2 - 1) * R, m = mask(x, z);
+      if (m < 0.06) continue;
+      if (r() > 0.08 + 0.92 * greenAt(x, z)) continue;           // mostly in the cushions
+      // they grow in little groups: drop 1-4 around this spot
+      const g = 1 + Math.floor(r() * 4);
+      for (let j = 0; j < g && list.length < n; j++) {
+        const px = x + (r() - 0.5) * 0.09, pz = z + (r() - 0.5) * 0.09, h = h0 + (h1 - h0) * r();
+        e.set((r() - 0.5) * 0.3, r() * 6.283, (r() - 0.5) * 0.3);
+        list.push(m4.compose(v.set(px, heightAt(px, pz) - 0.004, pz), q.setFromEuler(e), sc.set(h, h, h)).clone());
+      }
+    }
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(smallGeos[ki], grassMat, list.length);
+    list.forEach((mm, i) => { im.setMatrixAt(i, mm); im.setColorAt(i, c.setScalar(0.92 + 0.16 * r())); });
+    im.receiveShadow = true; im.castShadow = true;
+    scene.add(im); smallMeshes.push(im);
+  });
+}
+
+/* ================= canopy + trunks (off-screen forest, shadow-only) =================
+   The whole field sits under a canopy; sunlight leaks through noise-shaped gaps
+   (dappled light), and a few trunks cast long stripes across the field. */
+const sunDir = sun.position.clone().sub(sun.target.position).normalize();
+const sunH = new THREE.Vector2(sunDir.x, sunDir.z).normalize();       // toward the sun, on the ground
+const sunPerp = new THREE.Vector2(-sunH.y, sunH.x);
+const shadowOnly = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide, shadowSide: THREE.DoubleSide });
+// big patches + small flecks; the visual center is kept in a pool of light
+// light shaft: the canopy gap that lights the center at every height lies further from the sun
+// by h * cot(sun elevation), so open a gap along that line (ground up to ~1.1 m tall heads)
+let cotElev = Math.hypot(sunDir.x, sunDir.z) / sunDir.y;
+const poolC = { x: 0, z: 0 }; // follows the hero clump
+const shaft = (x, z) => {
+  let w = 0; x -= poolC.x; z -= poolC.z;
+  for (const h of [0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5]) {
+    const px = x + sunH.x * h * cotElev, pz = z + sunH.y * h * cotElev;
+    w = Math.max(w, Math.exp(-(px * px + pz * pz) / (2 * 0.38 * 0.38)));
+  }
+  return w;
+};
+const shadeN = (x, z) => fbm(x * 1.4 + 11, z * 1.4 - 4) * 0.7 + fbm(x * 4.5 + 2, z * 4.5 + 7) * 0.3 - 0.28 * shaft(x, z);
+let canopy, trunks;
+function buildCanopy(frac) {
+  for (const o of [canopy, trunks]) if (o) { scene.remove(o); o.dispose(); }
+  canopy = trunks = null;
+  if (frac <= 0.001) return;
+  // threshold so ~frac of the island is in shade
+  const vals = [];
+  for (let i = 0; i < 4000; i++) {
+    const x = (Math.random() * 2 - 1) * 1.7, z = (Math.random() * 2 - 1) * 1.7;
+    if (mask(x, z) > 0) vals.push(shadeN(x, z));
+  }
+  vals.sort((a, b) => a - b);
+  const q = vals[Math.min(vals.length - 1, Math.floor(vals.length * (1 - frac)))];
+  let sd = 99; const r = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const N = 6000, im = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), shadowOnly, N);
+  const m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  let n = 0;
+  for (let t = 0; t < N * 8 && n < N; t++) {
+    const x = (r() * 2 - 1) * 2.2, z = (r() * 2 - 1) * 2.2;
+    if (shadeN(x, z) + (r() - 0.5) * 0.04 < q) continue;            // gap -> sunlight
+    v.set(x, heightAt(x, z), z).addScaledVector(sunDir, 2.2 / Math.max(0.12, sunDir.y));
+    qt.setFromEuler(e.set(r() * 6.28, r() * 6.28, r() * 6.28));
+    const s = 0.05 + 0.07 * r();
+    im.setMatrixAt(n++, m4.compose(v, qt, sc.set(s, s * 0.7, 1)));
+  }
+  im.count = n; im.castShadow = true; im.frustumCulled = false;
+  scene.add(im); canopy = im;
+
+  // trunks between the sun and the field -> long diagonal stripes
+  const TR = 4, tg = new THREE.CylinderGeometry(1, 1, 1, 6);
+  const ti = new THREE.InstancedMesh(tg, shadowOnly, TR);
+  const offs = [-0.95, -0.2, 0.45, 1.1];
+  for (let i = 0; i < TR; i++) {
+    const d = 1.9 + r() * 0.5, o = offs[i] + (r() - 0.5) * 0.2, rad = 0.05 + r() * 0.05, h = 3;
+    const x = sunH.x * d + sunPerp.x * o, z = sunH.y * d + sunPerp.y * o;
+    ti.setMatrixAt(i, m4.compose(v.set(x, heightAt(x, z) + h / 2, z), qt.identity(), sc.set(rad, h, rad)));
+  }
+  ti.castShadow = true; ti.frustumCulled = false;
+  scene.add(ti); trunks = ti;
+}
+buildCanopy(0);
+
+/* ================= blue poppies (Meconopsis) ================= */
+let lilies = []; // {x,y,z,yaw,leanX,leanZ,s,ph,k}
+let lilySeed = 7070;
+const TIERS = { L: { k: [1, 1] } };
+const HEAD_H = 0.47;   // height of the flower spike's middle on the model (m, at s = 1)
+function genLilies(n, scatter) {
+  let sd = lilySeed; const r = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const ms = +document.getElementById('msize').value;
+  const out = [], centers = [];
+  for (let i = 0; i < n; i++) {
+    for (let tries = 0; tries < 3000; tries++) {
+      const x = (r() * 2 - 1) * R, z = (r() * 2 - 1) * R;
+      const m = mask(x, z), cw = centerW(x, z);
+      // the first (biggest) one stands near the middle; the rest anywhere on the slope
+      const w = smooth(0.15, 0.35, m) * (i === 0 ? cw * cw : 0.35 + 0.65 * (1 - cw));
+      if (r() > w) continue;
+      if (centers.some(c => Math.hypot(c.x - x, c.z - z) < (tries > 1500 ? 0.12 : 0.24))) continue;
+      const s = (i === 0 ? 1.0 : 0.55 + 0.4 * r()) * ms;
+      centers.push({ x, z, tier: i === 0 ? 'L' : 'S', s });
+      out.push({ x, y: heightAt(x, z) - 0.01, z, yaw: r() * 6.283, leanX: (r() - 0.5) * 0.14, leanZ: (r() - 0.5) * 0.14,
+        s, ph: r() * 6.283, k: 1 });
+      // sometimes a second, smaller stem right beside it
+      if (i > 0 && r() < 0.35) {
+        const a2 = r() * 6.283, x2 = x + Math.cos(a2) * 0.07, z2 = z + Math.sin(a2) * 0.07;
+        out.push({ x: x2, y: heightAt(x2, z2) - 0.01, z: z2, yaw: r() * 6.283, leanX: (r() - 0.5) * 0.2, leanZ: (r() - 0.5) * 0.2,
+          s: s * (0.6 + 0.2 * r()), ph: r() * 6.283, k: 1 });
+      }
+      break;
+    }
+  }
+  if (scatter) {   // small far-off plants up the slope: blue dots that suggest more of them
+    let k = 0, tries = 0;
+    while (k < 16 && tries++ < 6000) {
+      const x = (r() * 2 - 1) * R, z = (r() * 2 - 1) * R;
+      if (mask(x, z) < 0.12 || centerW(x, z) > 0.5 || x + z > 0.2) continue;   // back half only
+      out.push({ x, y: heightAt(x, z) - 0.01, z, yaw: r() * 6.283, leanX: (r() - 0.5) * 0.2, leanZ: (r() - 0.5) * 0.2,
+        s: (0.32 + 0.14 * r()) * ms, ph: r() * 6.283, k: 1 });
+      k++;
+    }
+  }
+  genLilies.centers = centers;
+  return out;
+}
+const lilyParts = []; // {geometry, material, isFlower}
+const lilyMeshes = [];
+const maskWhite = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+const maskBlack = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+const terrainMaskMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+function rebuildLilies() {
+  for (const im of lilyMeshes) { scene.remove(im); im.dispose(); }
+  lilyMeshes.length = 0;
+  lilies = genLilies(+ui.clumps.value, ui.hero.checked);
+  if (ui.fg.checked) lilies.push(...foregroundLilies());
+  if (lilies.length) for (const p of lilyParts) {
+    const im = new THREE.InstancedMesh(p.geometry, p.material, lilies.length);
+    im.castShadow = true; im.receiveShadow = true;
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.userData = { mat: p.material, maskMat: p.isFlower ? maskWhite : maskBlack, isStem: false };
+    scene.add(im); lilyMeshes.push(im);
+  }
+  document.getElementById('st').textContent = `${lilies.length} 株のメコノプシス`;
+  buildRocks();
+  focusHero();
+  const hero = (genLilies.centers || []).find(c => c.tier === 'L');
+  if (hero) { poolC.x = hero.x; poolC.z = hero.z; buildCanopy(+document.getElementById('shadef').value); }
+  buildSmallFlowers();
+}
+// focus on the flower heads of the biggest clump
+function focusHero() {
+  const hero = (genLilies.centers || []).find(c => c.tier === 'L');
+  if (!hero || typeof focusTarget === 'undefined') return;
+  const headY = heightAt(hero.x, hero.z) + HEAD_H * hero.s;
+  const v = new THREE.Vector3(hero.x, headY, hero.z), d = new THREE.Vector3();
+  cam.getWorldDirection(d);
+  focusTarget = v.sub(cam.position).dot(d);
+}
+// a few big flowers in the bottom-left region of the frame (over the land's lower rim and the
+// empty space below it), pulled toward the lens so DOF blurs them. The lower-edge crop hides
+// whatever falls below the land, so only part of each flower shows.
+let fgSeed = 31337;
+const fgRise = (s, k) => HEAD_H * s;   // base -> middle of the flower spike
+function foregroundLilies() {
+  let sd = fgSeed; const r = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  // placed with a fixed reference framing (zoom 1.3) so the layout doesn't move when zooming
+  const pc = cam.clone(); Object.assign(pc, { left: -1.3, right: 1.3, top: 1.3, bottom: -1.3 }); pc.updateProjectionMatrix();
+  const dir = new THREE.Vector3(); pc.getWorldDirection(dir);
+  const focusD = pc.position.distanceTo(target);
+  // land's lower edge on screen: lowest projected terrain point per column bin (NDC)
+  const BINS = 80, edge = new Array(BINS).fill(Infinity), pos = terrainMesh.geometry.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).project(pc);
+    const b = Math.floor((v.x + 1) / 2 * BINS);
+    if (b >= 0 && b < BINS) edge[b] = Math.min(edge[b], v.y);
+  }
+  const edgeAt = sx => edge[Math.min(BINS - 1, Math.max(0, Math.floor((sx + 1) / 2 * BINS)))];
+  // heads sit right on that edge (slightly above/below), so the crop leaves only their upper part
+  const n = 1 + Math.floor(r() * 2), spots = [];
+  for (let t = 0; t < 300 && spots.length < n; t++) {
+    const sx = -0.98 + r() * 1.18, e = edgeAt(sx);                        // bottom-left ~60% of the frame width
+    if (!isFinite(e)) continue;
+    const p = { sx, sy: e + 0.1 + r() * 0.3 };                          // higher above the edge, more spread
+    if (spots.every(q => Math.hypot(q.sx - p.sx, (q.sy - p.sy) * 1.5) > 0.32)) spots.push(p);
+  }
+  const mult = +document.getElementById('fgs').value;
+  return spots.map(p => {
+    const head = new THREE.Vector3(p.sx, p.sy, -1).unproject(pc);
+    head.addScaledVector(dir, focusD - (1.2 + r() * 1.0) - head.clone().sub(pc.position).dot(dir));
+    const s0 = 1.1 + r() * 0.5, yaw = r() * 6.283, k = 1.0, s = s0 * mult;
+    return { fg: true, hy: head.y, x: head.x, y: head.y - fgRise(s, k), z: head.z, yaw, leanX: 0, leanZ: 0,
+      s, s0, ph: yaw, k };
+  });
+}
+const ui = Object.fromEntries(['outline', 'palette', 'zoom', 'zoomv', 'clumps', 'clumpsv', 'hero', 'fg'].map(id => [id, document.getElementById(id)]));
+new GLTFLoader().load('meconopsis.glb', gltf => {
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return;
+    o.material.flatShading = true;
+    // thin papery petals: a touch of self-light so the blue stays luminous under a grey sky
+    if (o.material.name.startsWith('petal')) { o.material.emissive = o.material.color.clone(); o.material.emissiveIntensity = 0.12; o.material.defines = { IS_FLOWER: '' }; }
+    o.material.onBeforeCompile = patchFog;
+    lilyParts.push({ geometry: o.geometry, material: o.material,
+      isFlower: ['petal', 'petal_base', 'filament', 'anther'].includes(o.material.name) });
+  });
+  rebuildLilies();
+});
+const STEM_TOP = 0.42, _mStem = new THREE.Matrix4(), _off = new THREE.Vector3();
+const swayAxis = new THREE.Vector3(0, 1, 0).cross(WIND).normalize();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _ql = new THREE.Quaternion(),
+  _qw = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
+function updateLilies(t) {
+  if (!lilyMeshes.length) return;
+  lilies.forEach((l, i) => {
+    const w = windJS(l.x, l.z, t);
+    const ang = 0.015 + 0.07 * w + 0.01 * Math.sin(t * 2.3 + l.ph);
+    _qw.setFromAxisAngle(swayAxis, ang);
+    _ql.setFromEuler(_e.set(l.leanX, 0, l.leanZ));
+    _qy.setFromAxisAngle(UPV, l.yaw);
+    _q.copy(_qw).multiply(_ql).multiply(_qy);
+    // stem stretched by k, flower head lifted to the new stem top
+    _mStem.compose(_p.set(l.x, l.y, l.z), _q, _s.set(l.s, l.s * l.k, l.s));
+    _off.set(0, STEM_TOP * l.s * (l.k - 1), 0).applyQuaternion(_q);
+    _m.compose(_p.add(_off), _q, _s.setScalar(l.s));
+    for (const im of lilyMeshes) im.setMatrixAt(i, im.userData.isStem ? _mStem : _m);
+  });
+  for (const im of lilyMeshes) im.instanceMatrix.needsUpdate = true;
+}
+
+/* ================= floating motes ================= */
+const MOTES = 40, motePos = new Float32Array(MOTES * 3), moteSeed = [];
+for (let i = 0; i < MOTES; i++) {
+  const a = rnd() * 6.283, r = Math.sqrt(rnd()) * R * 1.1;
+  motePos.set([Math.cos(a) * r, 0.2 + rnd() * 1.0, Math.sin(a) * r], i * 3);
+  moteSeed.push(rnd() * 6.283);
+}
+const moteGeo = new THREE.BufferGeometry();
+moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+const motes = new THREE.Points(moteGeo, new THREE.PointsMaterial({ color: 0xc9d0d2, size: 1, sizeAttenuation: false }));
+motes.material.onBeforeCompile = patchFog;
+scene.add(motes);
+function updateMotes(dt, t) {
+  for (let i = 0; i < MOTES; i++) {
+    const k = i * 3;
+    motePos[k] += (WIND.x * 0.05 + 0.02 * Math.sin(t + moteSeed[i])) * dt;
+    motePos[k + 2] += (WIND.z * 0.05 + 0.02 * Math.cos(t * 0.7 + moteSeed[i])) * dt;
+    motePos[k + 1] += (0.03 + 0.02 * Math.sin(t * 1.3 + moteSeed[i])) * dt;
+    if (motePos[k + 1] > 1.3 || Math.hypot(motePos[k], motePos[k + 2]) > R * 1.3) {
+      const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * R;
+      motePos[k] = Math.cos(a) * r; motePos[k + 2] = Math.sin(a) * r; motePos[k + 1] = 0.15;
+    }
+  }
+  moteGeo.attributes.position.needsUpdate = true;
+}
+
+/* ================= pixel + dither post ================= */
+let PIX = 2, LOW = OUT / PIX;
+const RES_REF = 320; // DOF / crop sizes were tuned at 320 px; scale them with resolution
+const rt = new THREE.WebGLRenderTarget(LOW, LOW, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+  depthTexture: new THREE.DepthTexture(LOW, LOW) });
+rt.texture.generateMipmaps = false;
+// flower mask: white = visible flower head (fades with the same fog), black = anything else
+const maskRT = new THREE.WebGLRenderTarget(LOW, LOW, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+maskRT.texture.generateMipmaps = false;
+const maskFog = new THREE.Fog(0x000000, scene.fog.near, scene.fog.far);
+// land silhouette: anything below the land's lower edge (per screen column) is cropped away
+const landRT = new THREE.WebGLRenderTarget(LOW, LOW, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+landRT.texture.generateMipmaps = false;
+// per-column lowest land row, computed once per frame (LOW x 1) instead of a column scan per pixel
+const edgeRT = new THREE.WebGLRenderTarget(LOW, 1, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+edgeRT.texture.generateMipmaps = false;
+const edgeMat = new THREE.ShaderMaterial({
+  uniforms: { tLand: { value: landRT.texture }, uLow: { value: LOW } },
+  vertexShader: `void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tLand; uniform float uLow;
+    void main(){
+      float x = floor(gl_FragCoord.x), edge = 1e4;            // 1e4 = no land in this column
+      for (int i = 0; i < 2048; i++) {
+        float y = float(i);
+        if (y >= uLow) break;
+        if (texture2D(tLand, (vec2(x, y) + 0.5) / uLow).r > 0.5) { edge = y; break; }
+      }
+      gl_FragColor = vec4(edge, 0.0, 0.0, 1.0);
+    }`,
+  depthTest: false, depthWrite: false
+});
+const edgeScene = new THREE.Scene();
+{ const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), edgeMat); q.frustumCulled = false; edgeScene.add(q); }
+const landScene = new THREE.Scene();
+landScene.add(new THREE.Mesh(terrainMesh.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff })));
+const post = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse: { value: rt.texture }, tMask: { value: maskRT.texture }, uLow: { value: LOW },
+    uDither: { value: 0.55 }, uLevels: { value: 10 }, uOutline: { value: 0 }, uPalette: { value: 0 },
+    uBg: { value: new THREE.Vector3(BG.r, BG.g, BG.b) },
+    tDepth: { value: rt.depthTexture }, uNear: { value: cam.near }, uFar: { value: cam.far },
+    tEdge: { value: edgeRT.texture }, uClip: { value: 0 }, uClipPad: { value: 2 * LOW / RES_REF }, uClipMaxX: { value: 0.6 },
+    uRes: { value: LOW / RES_REF },
+    uPersp: { value: 1 }, uFocus: { value: 11.2 }, uFocusRange: { value: 0.8 }, uDof: { value: 2 }, uMaxR: { value: 2 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse, tMask, tDepth; uniform float uLow, uDither, uLevels, uOutline, uPalette; uniform vec3 uBg; varying vec2 vUv;
+    uniform float uNear, uFar, uFocus, uFocusRange, uDof, uMaxR;
+    uniform sampler2D tEdge; uniform float uClip, uClipPad, uClipMaxX, uRes;
+    uniform float uPersp;
+    float viewZ(vec2 uv){ float d = texture2D(tDepth, uv).x; return uPersp > 0.5 ? (uNear * uFar) / (uFar - d * (uFar - uNear)) : uNear + d * (uFar - uNear); }
+    float coc(float z){ return clamp((abs(z - uFocus) - uFocusRange) * uDof * uRes, 0.0, uMaxR * uRes); }
+    float b2(vec2 a){ a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }
+    float bayer4(vec2 a){ return b2(0.5 * a) * 0.25 + b2(a); }
+    vec3 toSRGB(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+    float mk(vec2 p){ return texture2D(tMask, (p + 0.5) / uLow).r; }
+    void main(){
+      vec2 px = floor(vUv * uLow);
+      vec2 uv0 = (px + 0.5) / uLow;
+      vec4 s = texture2D(tDiffuse, uv0);
+      vec3 lin = s.a < 0.5 ? uBg : s.rgb;
+      float alpha = s.a;
+      if (uDof > 0.0) {
+        // depth of field: gather on a golden-angle disc, in low-res pixels
+        float z0 = viewZ(uv0), c0 = coc(z0);
+        vec3 acc = lin; float aacc = alpha, wsum = 1.0;
+        for (int i = 0; i < 24; i++) {
+          float rad = sqrt((float(i) + 0.5) / 24.0) * uMaxR * uRes;
+          float ang = float(i) * 2.39996;
+          vec2 uv = (px + 0.5 + vec2(cos(ang), sin(ang)) * rad) / uLow;
+          vec4 ss = texture2D(tDiffuse, uv);
+          float zs = viewZ(uv), cs = coc(zs);
+          // nearer samples may bleed over us by their own blur; farther ones only within our blur
+          float reach = zs < z0 - 0.05 ? cs : min(cs, c0);
+          float w = 1.0 - smoothstep(reach, reach + 1.0, rad);
+          acc += (ss.a < 0.5 ? uBg : ss.rgb) * w; aacc += ss.a * w; wsum += w;
+        }
+        lin = acc / wsum; alpha = aacc / wsum;
+      }
+      if (uClip > 0.5 && px.x < uClipMaxX * uLow) {   // only the left part (where foreground flowers are)
+        // keep a pixel only if this screen column has land at or below it (GL y is up)
+        float edgeY = texture2D(tEdge, vec2((px.x + 0.5) / uLow, 0.5)).r;
+        if (px.y + uClipPad < edgeY) alpha = 0.0;
+      }
+      float m = mk(px);
+      vec3 c;
+      if (alpha < 0.25) c = toSRGB(uBg);
+      else {
+        c = lin * 1.08 / (1.0 + lin * 0.22);
+        c = toSRGB(c);
+        float l = dot(c, vec3(0.299, 0.587, 0.114));
+        c += mix(vec3(-0.012, 0.008, 0.03), vec3(0.035, 0.012, -0.03), smoothstep(0.1, 0.7, l));
+        c = mix(vec3(l), c, 1.1 + 0.25 * smoothstep(0.25, 0.6, l));
+        if (uPalette > 0.5 && m > 0.03) {
+          // lock flower heads to 3 reds: shadow / body / highlight
+          float t = clamp((l - 0.13) / 0.36, 0.0, 1.0) * 2.0 + (bayer4(px) - 0.5) * 0.9 * uDither;
+          vec3 pc = t < 0.5 ? vec3(0.42, 0.07, 0.11) : (t < 1.5 ? vec3(0.80, 0.13, 0.16) : vec3(1.0, 0.42, 0.27));
+          c = mix(c, pc, m);
+        } else {
+          float d = (bayer4(px) - 0.5) * uDither;
+          c = floor(c * uLevels + 0.5 + d) / uLevels;
+        }
+      }
+      if (uOutline > 0.5 && m < 0.03) {
+        float n = max(max(mk(px + vec2(1., 0.)), mk(px - vec2(1., 0.))), max(mk(px + vec2(0., 1.)), mk(px - vec2(0., 1.))));
+        if (n > 0.03) c = mix(c, vec3(0.16, 0.05, 0.06), 0.9 * n);
+      }
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }`,
+  depthTest: false, depthWrite: false
+});
+function renderMask() {
+  const fog = scene.fog, tm = terrainMesh.material, gm = grassMesh.material;
+  scene.fog = maskFog; terrainMesh.material = terrainMaskMat; grassMesh.material = grassMaskMat; motes.visible = false;
+  for (const im of lilyMeshes) im.material = im.userData.maskMat;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(maskRT); renderer.render(scene, cam);
+  renderer.shadowMap.autoUpdate = true;
+  scene.fog = fog; terrainMesh.material = tm; grassMesh.material = gm; motes.visible = true;
+  for (const im of lilyMeshes) im.material = im.userData.mat;
+}
+ui.outline.onchange = e => { post.uniforms.uOutline.value = e.target.checked ? 1 : 0; };
+ui.palette.onchange = e => { post.uniforms.uPalette.value = e.target.checked ? 1 : 0; };
+ui.zoom.oninput = e => {
+  const h = +e.target.value; ui.zoomv.textContent = h.toFixed(2);
+  Object.assign(cam, { left: -h, right: h, top: h, bottom: -h }); cam.updateProjectionMatrix();
+};
+ui.clumps.oninput = e => { ui.clumpsv.textContent = e.target.value; if (lilyParts.length) rebuildLilies(); };
+ui.hero.onchange = () => { if (lilyParts.length) rebuildLilies(); };
+document.getElementById('msize').oninput = () => { if (lilyParts.length) rebuildLilies(); };
+document.getElementById('rocks').oninput = e => { document.getElementById('rocksv').textContent = e.target.value; buildRocks(); };
+document.getElementById('smallf').oninput = () => buildSmallFlowers();
+document.getElementById('greenk').oninput = e => { GREEN = +e.target.value; rebuildGround(); };
+document.getElementById('rockroll').onclick = () => {
+  rockSeed = (Math.random() * 4294967296) >>> 0;
+  document.getElementById('rockseedv').textContent = 'rock ' + rockSeed;
+  buildRocks(); buildSmallFlowers();
+};
+ui.fg.onchange = () => { if (lilyParts.length) rebuildLilies(); };
+// resize foreground flowers in place (their base stays on the ground)
+document.getElementById('fgroll').onclick = () => {
+  fgSeed = (Math.random() * 4294967296) >>> 0;
+  document.getElementById('fgseedv').textContent = 'fg ' + fgSeed;
+  if (!ui.fg.checked) { ui.fg.checked = true; }
+  if (lilyParts.length) rebuildLilies();
+};
+document.getElementById('fgs').oninput = e => { for (const l of lilies) if (l.fg) { l.s = l.s0 * +e.target.value; l.y = l.hy - fgRise(l.s, l.k); } };
+document.getElementById('clip').onchange = e => { post.uniforms.uClip.value = e.target.checked ? 1 : 0; };
+document.getElementById('reroll').onclick = () => {
+  lilySeed = (Math.random() * 4294967296) >>> 0;
+  document.getElementById('seedv').textContent = 'seed ' + lilySeed;
+  if (lilyParts.length) rebuildLilies();
+};
+const postScene = new THREE.Scene();
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), post); quad.frustumCulled = false;
+postScene.add(quad);
+const postCam = new THREE.Camera();
+
+document.getElementById('pix').onchange = e => {
+  PIX = +e.target.value; LOW = Math.round(OUT / PIX);
+  rt.setSize(LOW, LOW); maskRT.setSize(LOW, LOW); landRT.setSize(LOW, LOW); edgeRT.setSize(LOW, 1);
+  post.uniforms.uLow.value = LOW; edgeMat.uniforms.uLow.value = LOW;
+  post.uniforms.uRes.value = LOW / RES_REF; post.uniforms.uClipPad.value = 2 * LOW / RES_REF;
+};
+document.getElementById('dither').onchange = e => { post.uniforms.uDither.value = e.target.checked ? 0.55 : 0; };
+
+/* ================= record ================= */
+document.getElementById('rec').onclick = () => {
+  const st = document.getElementById('st');
+  // prefer MP4/H.264 (uploads to X, thumbnails in Explorer); fall back to WebM if the browser can't
+  const type = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm']
+    .find(t => MediaRecorder.isTypeSupported(t));
+  const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
+  const mr = new MediaRecorder(renderer.domElement.captureStream(30), { mimeType: type, videoBitsPerSecond: 12e6 });
+  const chunks = [];
+  mr.ondataavailable = e => chunks.push(e.data);
+  mr.onstop = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(chunks, { type: type.split(';')[0] }));
+    a.download = 'scree_peek.' + ext; a.click(); st.textContent = '保存しました ' + ext.toUpperCase();
+  };
+  mr.start(); st.textContent = '録画中…';
+  setTimeout(() => mr.stop(), 5000);
+};
+
+/* ================= loop ================= */
+document.querySelectorAll('[data-fog]').forEach(el => el.oninput = () => {
+  const k = el.dataset.fog, v = +el.value;
+  fogU[k].value = v;
+  if (k === 'uFarStart') fogU.uFarEnd.value = v + 1.4;
+});
+// ---- focus: click to focus, smooth focus pull ----
+var focusTarget = cam.position.distanceTo(target); // start defocused (uFocus 11.2), then pull focus to the hero clump
+const camDir = new THREE.Vector3(); cam.getWorldDirection(camDir);
+const ray = new THREE.Raycaster();
+renderer.domElement.addEventListener('pointerdown', e => {
+  const b = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2((e.clientX - b.left) / b.width * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1), cam);
+  const hit = ray.intersectObjects([terrainMesh, ...lilyMeshes, ...rockMeshes], false)[0];
+  if (hit) focusTarget = hit.point.clone().sub(cam.position).dot(camDir);
+});
+document.querySelectorAll('[data-lit]').forEach(el => el.oninput = () => { litU[el.dataset.lit].value = +el.value; });
+document.getElementById('shadef').oninput = e => buildCanopy(+e.target.value);
+let dofOn = false;
+document.getElementById('dof').onchange = e => { dofOn = e.target.checked; };
+document.getElementById('dofs').oninput = e => { post.uniforms.uDof.value = +e.target.value; post.uniforms.uMaxR.value = Math.min(5, +e.target.value); };
+document.getElementById('dofr').oninput = e => { post.uniforms.uFocusRange.value = +e.target.value; };
+focusHero();
+
+/* ================= time of day =================
+   same sun azimuth (from screen top-left) for every preset; only height, colors and fill change. */
+const TOD = {
+  // flat grey mountain light: weak high sun for soft shadows, strong sky fill, pale mist
+  overcast: { elev: 62, sun: '#eef2f4', I: 1.5, sky: '#c9d1d6', gnd: '#5d6258', hI: 1.45, fog: '#9aa4a8', lift: [0.5, 0.52, 0.56], warm: 0 },
+  breaking: { elev: 40, sun: '#fff3dc', I: 3.6, sky: '#b6c4cf', gnd: '#4d5748', hI: 0.95, fog: '#8f9ba0', lift: [0.3, 0.33, 0.38] },
+  dawn:    { elev: 9,  sun: '#ffb39a', I: 2.6, sky: '#9fb2d8', gnd: '#2a2a35', hI: 0.55, fog: '#7d8aa3', lift: [0.13, 0.14, 0.2] },
+  morning: { elev: 34, sun: '#fff0d6', I: 3.8, sky: '#a8c2dc', gnd: '#36401f', hI: 0.65, fog: '#6c8480', lift: [0.15, 0.18, 0.14] },
+  noon:    { elev: 66, sun: '#fffaf0', I: 4.4, sky: '#b9d0e6', gnd: '#3d4426', hI: 0.75, fog: '#8a9a96', lift: [0.16, 0.18, 0.15] },
+  golden:  { elev: null, sun: '#ffc488', I: 4.2, sky: '#7f94a8', gnd: '#2c2a1a', hI: 0.6, fog: '#5a6b66', lift: [0.15, 0.17, 0.12] },
+  dusk:    { elev: 7,  sun: '#ff7444', I: 2.9, sky: '#4c5679', gnd: '#1d1a23', hI: 0.45, fog: '#4a4a63', lift: [0.12, 0.1, 0.18] },
+  // night: the 'sun' is the moon — cool blue-white, weaker; deep blue fill and haze; no warm shift on lit petals
+  night:   { elev: 28, sun: '#a9c2ff', I: 1.7, sky: '#22314f', gnd: '#0c0f16', hI: 0.4, fog: '#26324a', lift: [0.1, 0.13, 0.22], warm: 0 },
+};
+const SUN_AZ = new THREE.Vector2(-4.2, 1.6).normalize();
+const GOLDEN_ELEV = Math.atan2(2.8, Math.hypot(4.2, 1.6)) * 180 / Math.PI;
+function setTimeOfDay(key) {
+  const t = TOD[key], e = (t.elev ?? GOLDEN_ELEV) * Math.PI / 180;
+  sunDir.set(SUN_AZ.x * Math.cos(e), Math.sin(e), SUN_AZ.y * Math.cos(e));
+  sun.position.copy(sun.target.position).addScaledVector(sunDir, SUN_DIST);
+  sunH.set(sunDir.x, sunDir.z).normalize(); sunPerp.set(-sunH.y, sunH.x);
+  cotElev = Math.hypot(sunDir.x, sunDir.z) / sunDir.y;
+  sun.color.set(t.sun); sun.intensity = t.I;
+  hemi.color.set(t.sky); hemi.groundColor.set(t.gnd); hemi.intensity = t.hI;
+  scene.fog.color.set(t.fog);
+  litU.uShadowLift.value.set(...t.lift);
+  litU.uFlowerWarm.value = t.warm ?? 1;
+  buildCanopy(+document.getElementById('shadef').value);
+}
+document.getElementById('tod').onchange = e => setTimeOfDay(e.target.value);
+setTimeOfDay('overcast');
+
+/* ================= window ("parallax peek") camera =================
+   The canvas is a window: a rectangle S ± R*W ± U*W in the world, facing the viewer.
+   The eye E (from face tracking, in cm relative to the canvas center) looks through it with an
+   off-axis frustum (Kooima's generalized perspective projection), so the scene behind the window
+   shifts correctly as the head moves. */
+const pcam = new THREE.PerspectiveCamera();
+const P = {
+  W: H,                                   // half-size of the window in world units (= the ortho frame)
+  back: 1.55,                             // the window sits this far in front of the scene center
+  eyeCm: new THREE.Vector3(0, 0, 40),     // eye position, cm, relative to the canvas center (x right, y up, z out)
+  eyeTarget: new THREE.Vector3(0, 0, 40),
+};
+const coarse = matchMedia('(pointer: coarse)').matches;
+if (!coarse) { document.getElementById('scrw').value = 26; document.getElementById('camoff').value = 15; P.eyeCm.z = P.eyeTarget.z = 60; }
+document.getElementById('scrwv').textContent = document.getElementById('scrw').value;
+document.getElementById('camoffv').textContent = document.getElementById('camoff').value;
+const _R = new THREE.Vector3(), _U = new THREE.Vector3(), _N = new THREE.Vector3(), _S = new THREE.Vector3(), _E = new THREE.Vector3(), _B = new THREE.Matrix4();
+function windowBasis() {
+  cam.updateMatrixWorld();
+  _R.setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+  _U.setFromMatrixColumn(cam.matrixWorld, 1).normalize();
+  _N.setFromMatrixColumn(cam.matrixWorld, 2).normalize();      // toward the viewer
+  _S.copy(target).addScaledVector(_N, P.back);
+}
+function updatePeekCam() {
+  windowBasis();
+  P.W = cam.top;                                                 // follows the zoom slider
+  const k = 2 * P.W / +document.getElementById('scrw').value;    // world units per cm
+  const s = +document.getElementById('peekk').value;
+  P.eyeCm.lerp(P.eyeTarget, 0.35);
+  _E.copy(_S).addScaledVector(_R, P.eyeCm.x * k * s).addScaledVector(_U, P.eyeCm.y * k * s).addScaledVector(_N, Math.max(5, P.eyeCm.z) * k);
+  const n = 0.1, f = _E.distanceTo(_S) + 30;
+  const va = _S.clone().addScaledVector(_R, -P.W).addScaledVector(_U, -P.W).sub(_E);
+  const vb = _S.clone().addScaledVector(_R, P.W).addScaledVector(_U, -P.W).sub(_E);
+  const vc = _S.clone().addScaledVector(_R, -P.W).addScaledVector(_U, P.W).sub(_E);
+  const d = -va.dot(_N);
+  const l = _R.dot(va) * n / d, r = _R.dot(vb) * n / d, b = _U.dot(va) * n / d, t = _U.dot(vc) * n / d;
+  pcam.position.copy(_E);
+  pcam.quaternion.setFromRotationMatrix(_B.makeBasis(_R, _U, _N));
+  pcam.near = n; pcam.far = f;
+  pcam.updateMatrixWorld(true);
+  pcam.projectionMatrix.makePerspective(l, r, t, b, n, f);
+  pcam.projectionMatrixInverse.copy(pcam.projectionMatrix).invert();
+  post.uniforms.uNear.value = n; post.uniforms.uFar.value = f;
+  // keep the focus on the main poppy from wherever the eye is
+  const hero = (genLilies.centers || []).find(c => c.tier === 'L');
+  if (hero) { const hv = new THREE.Vector3(hero.x, heightAt(hero.x, hero.z) + HEAD_H * hero.s, hero.z); focusTarget = hv.sub(_E).dot(_N.clone().negate()); }
+  updateBox();
+}
+
+/* ---- the box behind the window: dim walls with a faint grid, so the depth reads ---- */
+const gridTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1c2225'; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = '#2b3438'; g.fillRect(0, 0, 64, 2); g.fillRect(0, 0, 2, 64);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const boxMat = new THREE.MeshBasicMaterial({ map: gridTex, side: THREE.BackSide, fog: false });
+const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [boxMat, boxMat, boxMat, boxMat, boxMat, new THREE.MeshBasicMaterial({ visible: false })]);
+scene.add(box);
+function updateBox() {
+  const D = +document.getElementById('boxd').value;
+  box.visible = document.getElementById('box').checked && D > 0.05;
+  if (!box.visible) return;
+  // box from the window plane back by D (+ the scene depth), sized to the window
+  const depth = P.back + D;
+  box.position.copy(_S).addScaledVector(_N, -depth / 2);
+  box.quaternion.setFromRotationMatrix(_B.makeBasis(_R, _U, _N));
+  box.scale.set(2 * P.W, 2 * P.W, depth);
+  for (const m of [boxMat]) { m.map.repeat.set(8, 8); }
+}
+
+/* ---- eye position: drag to simulate, or the front camera ---- */
+let tracking = false, dragging = false;
+renderer.domElement.addEventListener('pointerdown', e => { if (!tracking) { dragging = true; dragEye(e); } });
+addEventListener('pointerup', () => { dragging = false; });
+addEventListener('pointermove', e => { if (dragging && !tracking) dragEye(e); });
+function dragEye(e) {
+  const b = renderer.domElement.getBoundingClientRect();
+  const nx = (e.clientX - b.left) / b.width * 2 - 1, ny = -((e.clientY - b.top) / b.height * 2 - 1);
+  const w = +document.getElementById('scrw').value;
+  P.eyeTarget.set(-nx * w * 0.9, -ny * w * 0.9, P.eyeTarget.z);   // drag right = look in from the left
+}
+const trkSt = document.getElementById('trkst');
+document.getElementById('trk').onclick = async () => {
+  if (tracking) return;
+  trkSt.textContent = '顔認識を読み込み中…';
+  try {
+    const { FaceLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const mk = delegate => FaceLandmarker.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate },
+      runningMode: 'VIDEO', numFaces: 1 });
+    let fl;
+    try { fl = await mk('GPU'); } catch (e) { fl = await mk('CPU'); }   // some phones / WebViews have no GPU delegate
+    trkSt.textContent = 'カメラを要求中…';
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    const video = document.createElement('video'); video.playsInline = true; video.muted = true; video.srcObject = stream;
+    await video.play();
+    tracking = true; trkSt.textContent = 'トラッキング中';
+    let last = -1, lost = 0;
+    const loop = () => {
+      if (video.readyState >= 2 && video.currentTime !== last) {
+        last = video.currentTime;
+        const res = fl.detectForVideo(video, performance.now());
+        const lm = res.faceLandmarks && res.faceLandmarks[0];
+        if (lm) {
+          lost = 0;
+          const a = lm[468] || lm[33], b = lm[473] || lm[263];                 // iris centers (fallback: eye corners)
+          const vw = video.videoWidth, vh = video.videoHeight;
+          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+          const ipd = Math.hypot((a.x - b.x) * vw, (a.y - b.y) * vh) / vw;     // eye distance as a fraction of image width
+          const th = Math.tan(+document.getElementById('hfov').value * Math.PI / 360);
+          const z = 6.3 / (2 * th * Math.max(ipd, 1e-3));                       // cm, from the average eye distance
+          const sgn = document.getElementById('mirror').checked ? -1 : 1;
+          const x = sgn * (0.5 - mx) * 2 * th * z;
+          const y = (0.5 - my) * 2 * th * (vh / vw) * z + +document.getElementById('camoff').value;
+          P.eyeTarget.set(x, y, z);
+          trkSt.textContent = `トラッキング中 · 目 ${x.toFixed(0)}, ${y.toFixed(0)}, 距離 ${z.toFixed(0)} cm`;
+        } else if (++lost > 15) { trkSt.textContent = '顔が見つかりません（インカメラに顔を映してください）'; P.eyeTarget.set(0, 0, P.eyeTarget.z); }
+      }
+      requestAnimationFrame(loop);
+    };
+    loop();
+  } catch (err) {
+    trkSt.textContent = '開始できません：' + (err && err.message || err) + (isSecureContext ? '' : '（カメラには https か localhost が必要です）');
+  }
+};
+if (new URLSearchParams(location.search).has('autotrack')) setTimeout(() => document.getElementById('trk').click(), 300);
+for (const id of ['scrw', 'camoff', 'hfov']) document.getElementById(id).addEventListener('input', e => {
+  document.getElementById(id + 'v').textContent = e.target.value + (id === 'hfov' ? '°' : '');
+});
+
+/* ================= settings: copy / import / 5 save slots ================= */
+function getSettings() {
+  return {
+    v: 1, scene: 'scree', lilySeed, fgSeed, rockSeed, focus: +focusTarget.toFixed(4), tod: document.getElementById('tod').value,
+    ui: Object.fromEntries([...document.querySelectorAll('#ui input, #ui select')].filter(el => !('nosave' in el.dataset))
+      .map(el => [el.id || el.dataset.fog || el.dataset.lit, el.type === 'checkbox' ? el.checked : el.value])),
+  };
+}
+function applySettings(set) {
+  if (!set || typeof set.ui !== 'object') throw new Error('有効な設定ではありません');
+  // seeds first, so every rebuild triggered below already uses them
+  if (Number.isFinite(set.lilySeed)) lilySeed = set.lilySeed >>> 0;
+  if (Number.isFinite(set.fgSeed)) fgSeed = set.fgSeed >>> 0;
+  if (Number.isFinite(set.rockSeed)) rockSeed = set.rockSeed >>> 0;
+  document.getElementById('rockseedv').textContent = 'rock ' + rockSeed;
+  document.getElementById('seedv').textContent = 'seed ' + lilySeed;
+  document.getElementById('fgseedv').textContent = 'fg ' + fgSeed;
+  for (const [k, v] of Object.entries(set.ui)) {
+    const el = document.getElementById(k) || document.querySelector(`[data-fog="${k}"],[data-lit="${k}"]`);
+    if (!el || 'nosave' in el.dataset) continue;
+    if (el.type === 'checkbox') { el.checked = !!v; el.dispatchEvent(new Event('change')); }
+    else { el.value = v; el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input')); }
+  }
+  if (set.tod) { const t = document.getElementById('tod'); t.value = set.tod; t.dispatchEvent(new Event('change')); }
+  if (lilyParts.length) rebuildLilies();
+  if (Number.isFinite(set.focus)) { focusTarget = set.focus; post.uniforms.uFocus.value = set.focus; }
+}
+const SLOT_KEY = 'pixel-diorama-slots:' + location.pathname, SLOTS = 5;
+const readSlots = () => { try { const a = JSON.parse(localStorage.getItem(SLOT_KEY)); return Array.isArray(a) ? a : []; } catch { return []; } };
+const writeSlots = a => { try { localStorage.setItem(SLOT_KEY, JSON.stringify(a)); return true; } catch { return false; } };
+const slotSel = document.getElementById('slot'), stEl = document.getElementById('st');
+function renderSlots() {
+  const a = readSlots(), cur = slotSel.value || '0';
+  slotSel.innerHTML = '';
+  for (let i = 0; i < SLOTS; i++) {
+    const o = document.createElement('option'); o.value = i;
+    o.textContent = `スロット ${i + 1} · ` + (a[i] ? new Date(a[i].time).toLocaleString('ja', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '空');
+    slotSel.appendChild(o);
+  }
+  slotSel.value = cur;
+}
+renderSlots();
+document.getElementById('slotsave').onclick = () => {
+  const a = readSlots(), i = +slotSel.value;
+  a[i] = { time: Date.now(), data: getSettings() };
+  stEl.textContent = writeSlots(a) ? `スロット ${i + 1} に保存しました` : '保存できません（ブラウザのローカルストレージが無効です）';
+  renderSlots();
+};
+document.getElementById('slotload').onclick = () => {
+  const s = readSlots()[+slotSel.value];
+  if (!s) { stEl.textContent = `スロット ${+slotSel.value + 1} は空です`; return; }
+  try { applySettings(s.data); stEl.textContent = `スロット ${+slotSel.value + 1} を読み込みました`; } catch (e) { stEl.textContent = e.message; }
+};
+// dialog used for import and as copy fallback
+const dlg = document.getElementById('dlg'), dlgText = document.getElementById('dlgtext'), dlgMsg = document.getElementById('dlgmsg');
+function openDlg(title, text, importing) {
+  document.getElementById('dlgtitle').textContent = title;
+  dlgText.value = text; dlgMsg.textContent = '';
+  document.getElementById('dlgok').hidden = !importing;
+  dlg.hidden = false; dlgText.focus(); if (!importing) dlgText.select();
+}
+document.getElementById('dlgcancel').onclick = () => { dlg.hidden = true; };
+document.getElementById('dlgok').onclick = () => {
+  try { applySettings(JSON.parse(dlgText.value)); dlg.hidden = true; stEl.textContent = '設定を読み込みました'; }
+  catch (e) { dlgMsg.textContent = '読み込み失敗：' + e.message; }
+};
+document.getElementById('importset').onclick = () => openDlg('設定を読み込む（貼り付けて「適用」）', '', true);
+document.getElementById('copyset').onclick = async () => {
+  const txt = JSON.stringify(getSettings());
+  try { await navigator.clipboard.writeText(txt); stEl.textContent = '設定をコピーしました'; }
+  catch { openDlg('この設定をコピー', txt, false); }
+};
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  timeU.value = t;
+  const fu = post.uniforms.uFocus; fu.value += (focusTarget - fu.value) * Math.min(1, dt * 2.5);
+  post.uniforms.uDof.value = dofOn ? +document.getElementById('dofs').value : 0;
+  updateLilies(t); updateMotes(dt, t);
+  renderer.setRenderTarget(landRT); renderer.setClearColor(0x000000, 1); renderer.clear(); renderer.render(landScene, cam); renderer.setClearColor(0x000000, 0);
+  renderer.setRenderTarget(edgeRT); renderer.render(edgeScene, postCam);
+  updatePeekCam();
+  renderer.setRenderTarget(rt); renderer.render(scene, pcam);
+  if (lilyMeshes.length && (post.uniforms.uOutline.value || post.uniforms.uPalette.value)) renderMask();
+  else { renderer.setRenderTarget(maskRT); renderer.clear(); }
+  renderer.setRenderTarget(null); renderer.render(postScene, postCam);
+});
+buildRocks(); buildSmallFlowers();
+window.__ready = true;
+</script></body></html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>ピクセルジオラマ</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#111517;color:#cfd6cf;font:12px sans-serif;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  #bar{flex:none;display:flex;align-items:center;gap:10px;padding:6px 10px;background:#161b19;border-bottom:1px solid #2f3833}
+  #bar b{font-weight:600;letter-spacing:.08em;color:#8fa398}
+  select,button{background:#2c332e;color:#dde;border:1px solid #4a554d;padding:3px 8px;cursor:pointer;font:inherit}
+  #hint{opacity:.6}
+  iframe{flex:1;border:0;width:100%;display:block;background:#111517}
+</style></head><body>
+<div id="bar">
+  <b>シーン</b>
+  <select id="pick">
+    <option value="spider-lily/field.html">彼岸花の野</option>
+    <option value="forest-shrine/shrine.html">森の神社</option>
+    <option value="forest-shrine/shrine.html?tod=fireflies">森の神社 · ホタルの夜</option>
+    <option value="scree/scree.html">ガレ場 · メコノプシス</option>
+    <option value="scree/peek.html">ガレ場 · 裸眼3D（ヘッドトラッキング）</option>
+    <option value="kelp/kelp.html">海中のケルプの森</option>
+  </select>
+  <button id="prev" title="前へ（PageUp でも可）">◀</button><button id="next" title="次へ">▶</button>
+  <span id="hint">各シーン右上の ⚙ パネルもそのまま使えます</span>
+</div>
+<iframe id="view" title="シーン" allow="camera; fullscreen"></iframe>
+<script>
+  const pick = document.getElementById('pick'), view = document.getElementById('view');
+  const KEY = 'diorama-showcase-scene';
+  function show(src, push) {
+    pick.value = src;
+    view.src = src;
+    try { localStorage.setItem(KEY, src); } catch {}
+    if (push) history.replaceState(null, '', '#' + encodeURIComponent(src));
+  }
+  const opts = [...pick.options].map(o => o.value);
+  const fromHash = decodeURIComponent(location.hash.slice(1));
+  let start = opts.includes(fromHash) ? fromHash : null;
+  if (!start) { try { const s = localStorage.getItem(KEY); if (opts.includes(s)) start = s; } catch {} }
+  show(start || opts[0], true);
+  pick.onchange = () => { show(pick.value, true); pick.blur(); };
+  const step = d => show(opts[(opts.indexOf(pick.value) + d + opts.length) % opts.length], true);
+  document.getElementById('prev').onclick = () => step(-1);
+  document.getElementById('next').onclick = () => step(1);
+  addEventListener('keydown', e => { if (e.key === 'PageUp') step(-1); if (e.key === 'PageDown') step(1); });
+</script>
+</body></html>
