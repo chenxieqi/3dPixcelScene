@@ -3,13 +3,17 @@
 three.js で描いた 3D シーンを低解像度でレンダリングし、ディザをかけてドット絵風に見せる小さなジオラマ集です。
 `index.html` の上部にあるプルダウンでシーンを切り替えられます。
 
-| シーン | ファイル |
-|---|---|
-| 彼岸花の野 | `spider-lily/field.html` |
-| 森の神社（ホタルの夜も選べます） | `forest-shrine/shrine.html` |
-| ガレ場 · メコノプシス | `scree/scree.html` |
-| ガレ場 · 裸眼3D（ヘッドトラッキング） | `scree/peek.html` |
-| 海中のケルプの森 | `kelp/kelp.html` |
+| 彼岸花の野 | 森の神社 | 森の神社 · ホタルの夜 |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/spider-lily.png" width="300" alt="彼岸花の野"> | <img src="docs/screenshots/forest-shrine.png" width="300" alt="森の神社"> | <img src="docs/screenshots/forest-shrine-fireflies.png" width="300" alt="森の神社 · ホタルの夜"> |
+| `spider-lily/field.html` | `forest-shrine/shrine.html` | `forest-shrine/shrine.html?tod=fireflies` |
+
+| ガレ場 · メコノプシス | ガレ場 · 裸眼3D | 海中のケルプの森 |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/scree.png" width="300" alt="ガレ場 · メコノプシス"> | <img src="docs/screenshots/scree-peek.png" width="300" alt="ガレ場 · 裸眼3D"> | <img src="docs/screenshots/kelp.png" width="300" alt="海中のケルプの森"> |
+| `scree/scree.html` | `scree/peek.html`（ヘッドトラッキング） | `kelp/kelp.html` |
+
+スクリーンショットは各シーンの既定設定のまま撮ったものです（裸眼3D は少し横からのぞいた視点）。実際には草や海藻が揺れ、光や霧が動きます。
 
 ## 動かし方
 
